@@ -7,6 +7,23 @@
 	- The Model MUST have a PrimaryPart (this is the actual sliding panel)
 	- Script auto-adds a ProximityPrompt to the Model
 	- Door slides along local X or Z axis using CFrame math
+	
+	--[[
+	This system implements easily configurable sliding doors using server-side CFrame
+	animation rather than physics-based movement.
+
+	The primary goals of this approach are:
+	1) Deterministic behavior (doors always open/close exactly the same way)
+	2) Low overhead (doors only update while animating)
+	3) Simple configurability using Attributes instead of hardcoded values
+
+	The system is fully data-driven:
+	- Doors are discovered via CollectionService tags
+	- Behavior is controlled through Model Attributes
+	- Access is determined dynamically per-player
+
+	!! This makes the system scalable and easy to maintain without modifying code
+	when new doors are added.
 ]]
 
 --// Services
@@ -99,6 +116,15 @@ end
 --////////////////////////////////////////////////////////////
 --// DoorController class
 --////////////////////////////////////////////////////////////
+-- DoorController represents one logical door instance.
+-- Each tagged Model gets exactly one controller.
+--
+--  use a metatable-based class here to:
+-- - Keep per-door state isolated
+-- - Avoid global variables for door data
+-- - Make cleanup predictable when doors are removed
+
+
 local DoorController = {}
 DoorController.__index = DoorController
 
@@ -128,6 +154,12 @@ function DoorController.new(doorModel: Model)
 	return self
 end
 
+
+-- ! ApplyDefaultsIfMissing:
+-- Ensures all expected attributes exist on the Model.
+-- This allows doors to work immediately without requiring
+-- manual setup, while still letting designers override
+-- any value directly in Studio.
 function DoorController:ApplyDefaultsIfMissing()
 	for key, defaultValue in pairs(DEFAULTS) do
 		if self.Model:GetAttribute(key) == nil then
@@ -255,6 +287,11 @@ function DoorController:SetOpen(open: boolean, instant: boolean)
 	end
 end
 
+-- ! CinoyteCFrame
+-- Computes the door’s position based on an alpha value (0–1).
+-- Instead of storing absolute positions, we always offset
+-- from the original closed CFrame. This prevents cumulative
+-- floating-point drift and allows recalibration at runtime.
 function DoorController:ComputeCFrame(alpha: number)
 	-- Slide in local space relative to the CLOSED CFrame
 	local dist = self:GetSlideDistance() * alpha
@@ -274,6 +311,13 @@ function DoorController:StopMotion()
 	end
 end
 
+-- ! AnimateToTarger
+-- Animates the door using exponential smoothing instead of
+-- TweenService. This avoids creating extra objects and allows
+-- smooth motion even if frame rate fluctuates.
+--
+-- The Heartbeat connection only exists while the door is moving,
+-- which keeps idle performance effectively zero-cost.
 function DoorController:AnimateToTarget()
 	if self._movingConn then return end -- already moving
 
